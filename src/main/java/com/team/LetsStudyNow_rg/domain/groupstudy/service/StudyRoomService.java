@@ -10,6 +10,7 @@ import com.team.LetsStudyNow_rg.domain.groupstudy.repository.GroupMemberReposito
 import com.team.LetsStudyNow_rg.domain.groupstudy.repository.GroupRepository;
 import com.team.LetsStudyNow_rg.domain.groupstudy.repository.StudyRoomParticipantRepository;
 import com.team.LetsStudyNow_rg.domain.groupstudy.repository.StudyRoomRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,22 +19,29 @@ import java.util.stream.Collectors;
 
 @Service
 @Transactional(readOnly = true)
+@Slf4j
 public class StudyRoomService {
 
     private final StudyRoomRepository studyRoomRepository;
     private final StudyRoomParticipantRepository participantRepository;
     private final GroupRepository groupRepository;
     private final GroupMemberRepository groupMemberRepository;
+    private final com.team.LetsStudyNow_rg.domain.studyroom.service.StudySessionService studySessionService;
+    private final com.team.LetsStudyNow_rg.domain.timer.service.PersonalTimerService personalTimerService;
 
     // 생성자 주입
     public StudyRoomService(StudyRoomRepository studyRoomRepository,
                             StudyRoomParticipantRepository participantRepository,
                             GroupRepository groupRepository,
-                            GroupMemberRepository groupMemberRepository) {
+                            GroupMemberRepository groupMemberRepository,
+                            com.team.LetsStudyNow_rg.domain.studyroom.service.StudySessionService studySessionService,
+                            com.team.LetsStudyNow_rg.domain.timer.service.PersonalTimerService personalTimerService) {
         this.studyRoomRepository = studyRoomRepository;
         this.participantRepository = participantRepository;
         this.groupRepository = groupRepository;
         this.groupMemberRepository = groupMemberRepository;
+        this.studySessionService = studySessionService;
+        this.personalTimerService = personalTimerService;
     }
 
     // 스터디방 생성 (SRS 6.1.1~6.1.8)
@@ -84,6 +92,16 @@ public class StudyRoomService {
                 creatorId
         );
         participantRepository.save(participant);
+
+        // ✅ 공부 세션 시작
+        studySessionService.startStudySession(creatorId, "GROUP_STUDY", savedRoom.getId());
+        
+        // ✅ PersonalTimer 자동 시작 (공부 상태로 시작)
+        try {
+            personalTimerService.startTimer(creatorId, savedRoom.getId(), true);
+        } catch (IllegalStateException e) {
+            // 이미 활성 타이머가 있는 경우 무시 (로그는 PersonalTimerService에서 처리)
+        }
 
         return new StudyRoomResponse(savedRoom);
     }
@@ -145,6 +163,16 @@ public class StudyRoomService {
 
         StudyRoomParticipant participant = new StudyRoomParticipant(roomId, memberId);
         participantRepository.save(participant);
+
+        // ✅ 공부 세션 시작
+        studySessionService.startStudySession(memberId, "GROUP_STUDY", roomId);
+        
+        // ✅ PersonalTimer 자동 시작 (공부 상태로 시작)
+        try {
+            personalTimerService.startTimer(memberId, roomId, false);
+        } catch (IllegalStateException e) {
+            // 이미 활성 타이머가 있는 경우 무시 (로그는 PersonalTimerService에서 처리)
+        }
     }
 
     // 스터디방 퇴장
@@ -162,6 +190,20 @@ public class StudyRoomService {
         participantRepository.findByStudyRoomIdAndMemberId(roomId, memberId)
                 .orElseThrow(() -> new IllegalArgumentException("참여하지 않은 방입니다"));
 
+        // ✅ 공부 세션 종료 (레벨업 처리)
+        com.team.LetsStudyNow_rg.domain.studyroom.entity.StudySession activeSession = 
+            studySessionService.getActiveSession(memberId);
+        if (activeSession != null) {
+            studySessionService.endStudySession(activeSession.getId());
+        }
+        
+        // ✅ PersonalTimer 종료
+        try {
+            personalTimerService.endTimer(memberId);
+        } catch (IllegalArgumentException e) {
+            // 활성 타이머가 없는 경우 무시
+        }
+
         // 퇴장 처리
         room.removeParticipant();
         studyRoomRepository.save(room);
@@ -175,12 +217,40 @@ public class StudyRoomService {
         StudyRoom room = studyRoomRepository.findById(roomId)
                 .orElseThrow(() -> new IllegalArgumentException("스터디 방을 찾을 수 없습니다"));
 
+        log.info("스터디방 종료 시작 - 방ID: {}, 현재인원: {}", roomId, room.getCurrentMembers());
+
+        // ✅ 모든 참여자의 세션과 타이머 종료 (레벨업 처리)
+        List<StudyRoomParticipant> participants = participantRepository.findByStudyRoomId(roomId);
+        for (StudyRoomParticipant participant : participants) {
+            Long memberId = participant.getMemberId();
+            
+            // 공부 세션 종료 (레벨업 처리)
+            com.team.LetsStudyNow_rg.domain.studyroom.entity.StudySession activeSession = 
+                studySessionService.getActiveSession(memberId);
+            if (activeSession != null) {
+                com.team.LetsStudyNow_rg.domain.studyroom.dto.SessionEndResultDto result = 
+                    studySessionService.endStudySession(activeSession.getId());
+                log.info("방 종료 - 참여자 세션 종료 - 회원ID: {}, 공부시간: {}분, 레벨업: {}, 새레벨: {}", 
+                         memberId, result.studyMinutes(), result.leveledUp(), result.newLevel());
+            }
+            
+            // PersonalTimer 종료
+            try {
+                personalTimerService.endTimer(memberId);
+                log.info("방 종료 - 참여자 타이머 종료 완료 - 회원ID: {}", memberId);
+            } catch (IllegalArgumentException e) {
+                log.warn("방 종료 - 참여자 타이머 종료 실패 (활성 타이머 없음) - 회원ID: {}", memberId);
+            }
+        }
+
         // 방 종료
         room.end();
         studyRoomRepository.save(room);
 
         // 모든 참여자 자동 퇴장
         participantRepository.deleteByStudyRoomId(roomId);
+        
+        log.info("스터디방 종료 완료 - 방ID: {}, 종료된 참여자 수: {}", roomId, participants.size());
     }
 
     // 타이머 종료된 방 자동 종료 및 삭제
@@ -192,10 +262,39 @@ public class StudyRoomService {
                 .collect(Collectors.toList());
 
         for (StudyRoom room : activeRooms) {
+            log.info("시간 만료된 방 자동 종료 시작 - 방ID: {}, 제목: {}", room.getId(), room.getRoomName());
+            
+            // ✅ 모든 참여자의 세션과 타이머 종료 (레벨업 처리)
+            List<StudyRoomParticipant> participants = participantRepository.findByStudyRoomId(room.getId());
+            for (StudyRoomParticipant participant : participants) {
+                Long memberId = participant.getMemberId();
+                
+                // 공부 세션 종료 (레벨업 처리)
+                com.team.LetsStudyNow_rg.domain.studyroom.entity.StudySession activeSession = 
+                    studySessionService.getActiveSession(memberId);
+                if (activeSession != null) {
+                    com.team.LetsStudyNow_rg.domain.studyroom.dto.SessionEndResultDto result = 
+                        studySessionService.endStudySession(activeSession.getId());
+                    log.info("시간 만료 방 종료 - 참여자 세션 종료 - 회원ID: {}, 공부시간: {}분, 레벨업: {}, 새레벨: {}", 
+                             memberId, result.studyMinutes(), result.leveledUp(), result.newLevel());
+                }
+                
+                // PersonalTimer 종료
+                try {
+                    personalTimerService.endTimer(memberId);
+                    log.info("시간 만료 방 종료 - 참여자 타이머 종료 완료 - 회원ID: {}", memberId);
+                } catch (IllegalArgumentException e) {
+                    log.warn("시간 만료 방 종료 - 참여자 타이머 종료 실패 (활성 타이머 없음) - 회원ID: {}", memberId);
+                }
+            }
+            
             // 모든 참여자 삭제
             participantRepository.deleteByStudyRoomId(room.getId());
+            
             // 방 완전 삭제
             studyRoomRepository.delete(room);
+            
+            log.info("시간 만료된 방 자동 종료 완료 - 방ID: {}, 종료된 참여자 수: {}", room.getId(), participants.size());
         }
     }
 
@@ -216,9 +315,29 @@ public class StudyRoomService {
             throw new IllegalArgumentException("방에 다른 멤버가 있을 때는 삭제할 수 없습니다");
         }
 
-        // 3. 참여자 삭제 후 방 삭제
+        // 3. 방 생성자의 공부 세션 종료 (레벨업 처리)
+        com.team.LetsStudyNow_rg.domain.studyroom.entity.StudySession activeSession = 
+            studySessionService.getActiveSession(memberId);
+        if (activeSession != null) {
+            com.team.LetsStudyNow_rg.domain.studyroom.dto.SessionEndResultDto result = 
+                studySessionService.endStudySession(activeSession.getId());
+            log.info("방 삭제 - 방장 세션 종료 - 회원ID: {}, 공부시간: {}분, 레벨업: {}, 새레벨: {}", 
+                     memberId, result.studyMinutes(), result.leveledUp(), result.newLevel());
+        }
+        
+        // 4. 방 생성자의 PersonalTimer 종료
+        try {
+            personalTimerService.endTimer(memberId);
+            log.info("방 삭제 - 방장 타이머 종료 완료 - 회원ID: {}", memberId);
+        } catch (IllegalArgumentException e) {
+            log.warn("방 삭제 - 방장 타이머 종료 실패 (활성 타이머 없음) - 회원ID: {}", memberId);
+        }
+
+        // 5. 참여자 삭제 후 방 삭제
         participantRepository.deleteByStudyRoomId(roomId);
         studyRoomRepository.delete(room);
+        
+        log.info("그룹스터디 방 삭제 완료 - 방ID: {}, 방장ID: {}", roomId, memberId);
     }
 
     // 스터디방 참여자 목록 조회

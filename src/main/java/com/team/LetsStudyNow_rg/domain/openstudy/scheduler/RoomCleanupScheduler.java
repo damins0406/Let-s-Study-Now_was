@@ -45,25 +45,31 @@ public class RoomCleanupScheduler {
      */
     @Scheduled(fixedRate = 60000, initialDelay = 30000)
     public void deleteAloneRooms() {
-        log.debug("생성자 혼자 있는 방 확인 시작");
+        log.debug("=== 생성자 혼자 있는 방 확인 시작 ===");
         
         try {
             // 5분 전에 생성됐고 현재도 1명인 방 목록 조회
             List<OpenStudyRoom> aloneRooms = openStudyRoomService.getAloneRoomsExpired();
             
-            if (!aloneRooms.isEmpty()) {
+            if (aloneRooms.isEmpty()) {
+                log.debug("생성자 혼자 5분 경과한 방 없음");
+            } else {
                 log.info("생성자 혼자 5분 경과한 방 {}개 발견", aloneRooms.size());
                 
                 // 각 방을 순회하며 삭제 처리
                 for (OpenStudyRoom room : aloneRooms) {
                     try {
+                        log.info("방 자동 삭제 시도 (생성자 혼자) - 방ID: {}, 제목: {}, 현재인원: {}, 혼자타이머: {}",
+                            room.getId(), room.getTitle(), room.getCurrentParticipants(), room.getAloneTimerStartedAt());
+                        
                         openStudyRoomService.deleteAloneRoom(room.getId(), 
                             "5분 동안 다른 참여자가 없어 방이 삭제됩니다.");
-                        log.info("방 자동 삭제 완료 (생성자 혼자) - 방ID: {}, 제목: {}", 
+                        
+                        log.info("방 자동 삭제 완료 (생성자 혼자) - 방ID: {}, 제목: {}",
                             room.getId(), room.getTitle());
                     } catch (Exception e) {
                         // 개별 방 삭제 실패 시 로그만 남기고 계속 진행
-                        log.error("방 삭제 실패 - 방ID: {}, 오류: {}", room.getId(), e.getMessage());
+                        log.error("방 삭제 실패 - 방ID: {}, 오류: {}", room.getId(), e.getMessage(), e);
                     }
                 }
             }
@@ -71,6 +77,8 @@ public class RoomCleanupScheduler {
             // 전체 스케줄러 로직 실패 시 에러 로그
             log.error("생성자 혼자 있는 방 확인 중 오류: {}", e.getMessage(), e);
         }
+        
+        log.debug("=== 생성자 혼자 있는 방 확인 종료 ===");
     }
     
     /**
@@ -94,13 +102,15 @@ public class RoomCleanupScheduler {
      */
     @Scheduled(fixedRate = 60000, initialDelay = 30000)
     public void deleteScheduledRooms() {
-        log.debug("삭제 예정 방 확인 시작");
+        log.debug("=== 삭제 예정 방 확인 시작 ===");
         
         try {
             // 삭제 예정 시간이 지난 방 목록 조회
             List<OpenStudyRoom> roomsToDelete = openStudyRoomService.getRoomsToDelete();
             
-            if (!roomsToDelete.isEmpty()) {
+            if (roomsToDelete.isEmpty()) {
+                log.debug("삭제 대상 방 없음");
+            } else {
                 log.info("삭제 대상 방 {}개 발견", roomsToDelete.size());
                 
                 // 각 방을 순회하며 삭제 처리
@@ -111,12 +121,17 @@ public class RoomCleanupScheduler {
                             ? "빈 방 5분 경과" 
                             : "방 참여자가 2명 미만이 되어 5분 후 방을 삭제합니다.";
                         
+                        log.info("방 자동 삭제 시도 - 방ID: {}, 제목: {}, 현재인원: {}, 상태: {}, 삭제예정: {}, 사유: {}",
+                            room.getId(), room.getTitle(), room.getCurrentParticipants(), 
+                            room.getStatus(), room.getDeleteScheduledAt(), reason);
+                        
                         openStudyRoomService.deleteRoom(room.getId());
-                        log.info("방 자동 삭제 완료 - 방ID: {}, 제목: {}, 사유: {}", 
+                        
+                        log.info("방 자동 삭제 완료 - 방ID: {}, 제목: {}, 사유: {}",
                             room.getId(), room.getTitle(), reason);
                     } catch (Exception e) {
                         // 개별 방 삭제 실패 시 로그만 남기고 계속 진행
-                        log.error("방 삭제 실패 - 방ID: {}, 오류: {}", room.getId(), e.getMessage());
+                        log.error("방 삭제 실패 - 방ID: {}, 오류: {}", room.getId(), e.getMessage(), e);
                     }
                 }
             }
@@ -124,5 +139,7 @@ public class RoomCleanupScheduler {
             // 전체 스케줄러 로직 실패 시 에러 로그
             log.error("삭제 예정 방 확인 중 오류: {}", e.getMessage(), e);
         }
+        
+        log.debug("=== 삭제 예정 방 확인 종료 ===");
     }
 }

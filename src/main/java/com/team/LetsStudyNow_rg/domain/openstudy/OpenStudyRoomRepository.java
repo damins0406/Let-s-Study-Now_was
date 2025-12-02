@@ -29,8 +29,11 @@ public interface OpenStudyRoomRepository extends JpaRepository<OpenStudyRoom, Lo
     
     /**
      * 삭제 예정 시간이 지난 방 조회
+     * 추가 조건: currentParticipants가 1 이하인 경우만 삭제
      */
-    @Query("SELECT r FROM OpenStudyRoom r WHERE r.status = :status AND r.deleteScheduledAt <= :now")
+    @Query("SELECT r FROM OpenStudyRoom r WHERE r.status = :status " +
+           "AND r.deleteScheduledAt <= :now " +
+           "AND r.currentParticipants <= 1")
     List<OpenStudyRoom> findRoomsToDelete(
         @Param("status") RoomStatus status, 
         @Param("now") LocalDateTime now
