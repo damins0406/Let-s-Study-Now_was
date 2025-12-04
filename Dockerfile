@@ -19,5 +19,5 @@ RUN ./gradlew build -x test --no-daemon
 # 포트 노출
 EXPOSE 8080
 
-# JAR 실행
-CMD ["sh", "-c", "java -jar build/libs/*.jar"]
+# JAR 실행 (수정된 부분!)
+CMD ["java", "-jar", "build/libs/LetsStudyNow-rg-0.0.1-SNAPSHOT.jar"]
