@@ -27,7 +27,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     }
 
-    @Overrid
+    @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
         // 2. 구독 요청 (서버 -> 클라이언트)
         registry.enableSimpleBroker("/sub");
