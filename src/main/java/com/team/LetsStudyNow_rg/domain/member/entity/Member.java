@@ -40,6 +40,9 @@ public class Member {
     @Column(nullable = false)
     private Integer adoptionCount = 0; // 답변 채택 횟수
 
+    @Column(nullable = false)
+    private boolean deleted = false;
+
     @Builder
     public Member(String email, String username, String password, Role role, String studyField, String bio, String profileImage) {
         this.email = email;

@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -93,10 +94,22 @@ public class MemberUpdateService {
         Member user = memberRepository.findById(customUser.id)
                 .orElseThrow(() -> new MemberNotFoundException(customUser.id));
 
-        // 커스텀 예외 적용
+        // 1. 비밀번호 확인
         if (!passwordEncoder.matches(req.password(), user.getPassword())) {
             throw new PasswordMismatchException("비밀번호가 일치하지 않습니다.");
         }
-        memberRepository.delete(user);
+
+        // 2. Soft Delete: deleted 플래그 설정
+        user.setDeleted(true);
+
+        // 3. 개인정보 마스킹 및 유니크 키 충돌 방지
+        String uuid = UUID.randomUUID().toString().substring(0, 8);
+
+        user.setEmail("deleted_" + user.getId() + "_" + uuid);
+        user.setUsername("unknown_" + user.getId() + "_" + uuid);
+
+        // 4. 기타 정보 초기화
+        user.setBio("탈퇴한 사용자입니다.");
+        user.setProfileImage(defaultProfileImageUrl); // 프로필 이미지 초기화
     }
 }
