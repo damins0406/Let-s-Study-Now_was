@@ -1,0 +1,16 @@
+# IntelliJ 설정 파일
+.idea/
+*.iml
+
+# Gradle 빌드 관련 파일
+.gradle/
+build/
+
+# IDE 빌드 결과물
+out/
+
+# 로그 파일
+*.log
+
+# Mac OS 시스템 파일
+.DS_Store

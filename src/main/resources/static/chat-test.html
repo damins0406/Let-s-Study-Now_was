@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Chat Full Feature Test</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 900px; margin: 0 auto; background-color: #f4f4f4; }
+        .container { display: flex; gap: 20px; }
+        .left-panel { flex: 1; }
+        .right-panel { flex: 1; }
+
+        .input-group { margin-bottom: 15px; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h3 { margin-top: 0; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; color: #555; }
+        input[type="text"], select, input[type="number"] { padding: 8px; width: 100%; box-sizing: border-box; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; }
+
+        button { padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; transition: 0.2s; }
+        .btn-connect { background-color: #4CAF50; }
+        .btn-send { background-color: #2196F3; }
+        .btn-solve { background-color: #9C27B0; }
+        button:hover { opacity: 0.9; }
+
+        #chat-area {
+            list-style-type: none; padding: 10px; margin: 0;
+            border: 1px solid #ccc; height: 600px; overflow-y: scroll;
+            background: white; border-radius: 8px;
+        }
+        #chat-area li { padding: 8px; border-bottom: 1px solid #eee; font-size: 0.9em; }
+
+        /* 메시지 스타일 */
+        .msg-SYSTEM { color: #d32f2f; font-weight: bold; background-color: #ffebee; text-align: center; }
+        .msg-QUESTION { background-color: #e3f2fd; border-left: 4px solid #2196F3; }
+        .msg-ANSWER { background-color: #f1f8e9; border-left: 4px solid #8bc34a; margin-left: 20px; }
+        .msg-SOLVE { background-color: #fff3e0; color: #ef6c00; font-weight: bold; text-align: center; }
+
+        .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; color: white; margin-right: 5px; }
+        .bg-q { background-color: #2196F3; }
+        .bg-a { background-color: #8bc34a; }
+
+        .chat-image { max-width: 150px; border-radius: 5px; display: block; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<h2>🧪 채팅 & 질문해결 통합 테스트</h2>
+
+<div class="input-group">
+    <label>🔑 JWT Token (Bearer 없이):</label>
+    <input type="text" id="jwtToken" placeholder="로그인 후 받은 토큰 붙여넣기...">
+</div>
+
+<div class="container">
+    <div class="left-panel">
+
+        <div class="input-group">
+            <h3>1. 방 입장</h3>
+            <label>방 번호 / 타입:</label>
+            <div style="display: flex; gap: 5px;">
+                <input type="text" id="roomId" value="1" style="width: 50%;">
+                <select id="roomType" style="width: 50%;">
+                    <option value="OPEN">OPEN</option>
+                    <option value="GROUP">GROUP</option>
+                </select>
+            </div>
+            <button onclick="connect()" class="btn-connect">🔌 소켓 연결</button>
+            <button onclick="disconnect()" style="background-color: #666;">❌ 해제</button>
+            <span id="status" style="color: red; font-weight: bold; margin-left: 10px;">OFF</span>
+        </div>
+
+        <div class="input-group">
+            <h3>2. 메시지 보내기</h3>
+            <label>메시지 타입:</label>
+            <select id="msgType" onchange="toggleRefId()">
+                <option value="TALK">💬 일반 대화 (TALK)</option>
+                <option value="QUESTION">❓ 질문 하기 (QUESTION)</option>
+                <option value="ANSWER">💡 답변 달기 (ANSWER)</option>
+            </select>
+
+            <div id="refIdGroup" style="display: none; background: #eee; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
+                <label>어떤 질문에 대한 답변인가요? (질문 ID):</label>
+                <input type="number" id="refId" placeholder="질문 메시지의 ID 입력">
+            </div>
+
+            <label>내용:</label>
+            <input type="text" id="message" value="안녕하세요">
+            <button onclick="sendMessage()" class="btn-send">📤 전송</button>
+        </div>
+
+        <div class="input-group" style="border: 2px solid #9C27B0;">
+            <h3 style="color: #9C27B0;">3. 👑 해결 및 채택 (HTTP API)</h3>
+            <p style="font-size: 0.8em; color: #666;">* 본인이 작성한 질문만 해결 가능</p>
+
+            <label>해결할 질문 ID (필수):</label>
+            <input type="number" id="solveQuestionId" placeholder="예: 10">
+
+            <label>채택할 답변 ID (선택):</label>
+            <input type="number" id="solveAnswerId" placeholder="예: 11 (없으면 단순해결)">
+
+            <button onclick="callSolveApi()" class="btn-solve">✨ 해결/채택 요청</button>
+        </div>
+
+        <div class="input-group">
+            <h3>4. 이미지 전송</h3>
+            <input type="file" id="imageInput" accept="image/*">
+            <button onclick="sendImage()" style="background-color: #FF9800;">📷 업로드 & 전송</button>
+        </div>
+    </div>
+
+    <div class="right-panel">
+        <ul id="chat-area">
+            <li style="text-align: center; color: #999;">채팅 내역이 여기에 표시됩니다.</li>
+        </ul>
+    </div>
+</div>
+
+<script>
+    var stompClient = null;
+
+    function getToken() { return document.getElementById("jwtToken").value.trim(); }
+
+    function toggleRefId() {
+        var type = document.getElementById("msgType").value;
+        document.getElementById("refIdGroup").style.display = (type === 'ANSWER') ? 'block' : 'none';
+    }
+
+    function connect() {
+        var token = getToken();
+        if (!token) { alert("토큰을 입력하세요."); return; }
+
+        var socket = new SockJS('http://localhost:8080/ws-stomp');
+        stompClient = Stomp.over(socket);
+
+        var headers = { 'Authorization': 'Bearer ' + token };
+
+        stompClient.connect(headers, function (frame) {
+            console.log('Connected: ' + frame);
+            document.getElementById("status").innerText = "ON";
+            document.getElementById("status").style.color = "green";
+            document.getElementById("chat-area").innerHTML = ""; // 초기화
+
+            var roomId = document.getElementById("roomId").value;
+            var roomType = document.getElementById("roomType").value;
+
+            // 구독
+            stompClient.subscribe('/sub/chat/' + roomType.toLowerCase() + '/' + roomId, function (res) {
+                showChat(JSON.parse(res.body));
+            });
+
+            // 입장
+            stompClient.send("/pub/chat/message", headers, JSON.stringify({
+                'type': 'ENTER',
+                'roomType': roomType,
+                'roomId': roomId,
+                'message': ''
+            }));
+
+        }, function(err) {
+            alert("연결 실패");
+            console.error(err);
+        });
+    }
+
+    function sendMessage() {
+        if (!stompClient) return;
+
+        var type = document.getElementById("msgType").value;
+        var message = document.getElementById("message").value;
+        var roomId = document.getElementById("roomId").value;
+        var roomType = document.getElementById("roomType").value;
+        var refId = document.getElementById("refId").value; // 답변일 때만 값 있음
+
+        var payload = {
+            'type': type,
+            'roomType': roomType,
+            'roomId': roomId,
+            'message': message
+        };
+
+        if(type === 'ANSWER') {
+            if(!refId) { alert("답변에는 질문 ID가 필요합니다!"); return; }
+            payload.refId = refId;
+        }
+
+        stompClient.send("/pub/chat/message",
+            { 'Authorization': 'Bearer ' + getToken() },
+            JSON.stringify(payload)
+        );
+
+        document.getElementById("message").value = "";
+    }
+
+    // ★ 수정된 callSolveApi 함수
+    function callSolveApi() {
+        var questionId = document.getElementById("solveQuestionId").value;
+        var answerId = document.getElementById("solveAnswerId").value;
+        var token = getToken();
+
+        if(!questionId) { alert("해결할 질문 ID를 입력하세요."); return; }
+
+        var url = `http://localhost:8080/api/chat/message/${questionId}/solve`;
+
+        // 쿼리 파라미터로 전달
+        if(answerId) {
+            url += `?answerId=${answerId}`;
+        }
+
+        fetch(url, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': 'Bearer ' + token
+                // 'Content-Type': 'application/json'  <-- ★ 이 줄을 지우세요! Body가 없으면 안 보내는 게 맞습니다.
+            }
+        })
+        .then(async response => {
+            if(response.ok) {
+                alert("성공! 채팅창을 확인하세요.");
+            } else {
+                // 에러 메시지 확인
+                var txt = await response.text();
+                console.error("에러 내용:", txt); // 콘솔에도 출력
+                alert("실패: " + txt);
+            }
+        })
+        .catch(err => console.error(err));
+    }
+
+    // ★ 이미지 전송 (완전한 코드 추가됨)
+    function sendImage() {
+        if (!stompClient || !stompClient.connected) {
+            alert("먼저 연결해주세요!");
+            return;
+        }
+
+        var fileInput = document.getElementById('imageInput');
+        var file = fileInput.files[0];
+        if (!file) {
+            alert("파일을 선택하세요.");
+            return;
+        }
+
+        var formData = new FormData();
+        formData.append("file", file);
+
+        fetch('/api/chat/image', {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + getToken()
+            },
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) throw new Error("이미지 업로드 실패");
+            return response.text();
+        })
+        .then(imageUrl => {
+            console.log("업로드 성공:", imageUrl);
+
+            var roomId = document.getElementById("roomId").value;
+            var roomType = document.getElementById("roomType").value;
+            var headers = { 'Authorization': 'Bearer ' + getToken() };
+
+            stompClient.send("/pub/chat/message", headers, JSON.stringify({
+                'type': 'IMAGE',
+                'roomType': roomType,
+                'roomId': roomId,
+                'message': imageUrl
+            }));
+
+            fileInput.value = '';
+            alert("이미지 전송 완료");
+        })
+        .catch(error => {
+            console.error("Error:", error);
+            alert("이미지 업로드 중 오류 발생");
+        });
+    }
+
+    // 채팅 화면 그리기 (완전한 코드)
+    function showChat(msg) {
+        var chatArea = document.getElementById("chat-area");
+        var li = document.createElement("li");
+
+        // 메시지 ID 표시 (테스트용)
+        var idBadge = msg.messageId ? `[ID:${msg.messageId}] ` : '';
+
+        // 타입별 스타일 적용
+        li.className = "msg-" + msg.type;
+
+        if (msg.type === 'QUESTION') {
+            li.innerHTML = `${idBadge}<span class="badge bg-q">질문</span> <strong>${msg.sender}</strong>: ${msg.message} (미해결)`;
+        } else if (msg.type === 'ANSWER') {
+            var selectedMark = msg.isSelected ? "👑(채택됨) " : "";
+            li.innerHTML = `${idBadge}↳ <span class="badge bg-a">답변</span>(to ID:${msg.refId}) <strong>${msg.sender}</strong>: ${selectedMark}${msg.message}`;
+        } else if (msg.type === 'SOLVE') {
+            li.innerHTML = `🎉 <strong>SYSTEM</strong>: ${msg.message} (질문ID: ${msg.messageId})`;
+        } else if (msg.type === 'IMAGE') {
+            li.innerHTML = `${idBadge}<strong>${msg.sender}</strong>: <img src="${msg.message}" class="chat-image">`;
+        } else {
+            // ENTER, TALK
+            li.innerHTML = `${idBadge}<strong>${msg.sender}</strong>: ${msg.message}`;
+        }
+
+        chatArea.appendChild(li);
+        chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+    function disconnect() {
+        if(stompClient) stompClient.disconnect();
+        document.getElementById("status").innerText="OFF";
+        document.getElementById("status").style.color = "red";
+    }
+</script>
+</body>
+</html>
