@@ -6,6 +6,8 @@ import com.team.LetsStudyNow_rg.domain.groupstudy.dto.AddGroupMemberRequest;
 import com.team.LetsStudyNow_rg.domain.groupstudy.dto.GroupMemberResponse;
 import com.team.LetsStudyNow_rg.domain.groupstudy.repository.GroupMemberRepository;
 import com.team.LetsStudyNow_rg.domain.groupstudy.repository.GroupRepository;
+import com.team.LetsStudyNow_rg.domain.member.entity.Member;
+import com.team.LetsStudyNow_rg.domain.member.repository.MemberRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,12 +20,15 @@ public class GroupMemberService {
 
     private final GroupMemberRepository groupMemberRepository;
     private final GroupRepository groupRepository;
+    private final MemberRepository memberRepository;
 
     // 생성자 주입
     public GroupMemberService(GroupMemberRepository groupMemberRepository,
-                              GroupRepository groupRepository) {
+                              GroupRepository groupRepository,
+                              MemberRepository memberRepository) {
         this.groupMemberRepository = groupMemberRepository;
         this.groupRepository = groupRepository;
+        this.memberRepository = memberRepository;
     }
 
     // 멤버 추가
@@ -54,7 +59,12 @@ public class GroupMemberService {
     public List<GroupMemberResponse> getGroupMembers(Long groupId) {
         List<GroupMember> members = groupMemberRepository.findByGroupId(groupId);
         return members.stream()
-                .map(GroupMemberResponse::new)
+                .map(groupMember -> {
+                    // Member 정보 조회
+                    Member member = memberRepository.findById(groupMember.getMemberId())
+                            .orElseThrow(() -> new IllegalArgumentException("멤버를 찾을 수 없습니다: " + groupMember.getMemberId()));
+                    return new GroupMemberResponse(groupMember, member);
+                })
                 .collect(Collectors.toList());
     }
 
